@@ -3,6 +3,9 @@ use std::process::Command;
 use std::fs;
 use std::path::Path;
 
+use std::collections::HashSet;
+
+#[derive(Hash, Eq, PartialEq, Debug)]
 struct Dylib {
     path: String
 }
@@ -38,9 +41,9 @@ fn _get_absolute_path(path: &Path, parent: &Path) -> Option<String> {
 
 fn main() {
     let args:Vec<String> = env::args().collect();
-    let file = &args[1];
-    let libs_dir = &args[2];
-    let libs_prefix = &args[3];
+    let file = &args[1].trim();
+    let libs_dir = &args[2].trim().trim_right_matches("/");
+    let libs_prefix = &args[3].trim().trim_right_matches("/");
 
     // create libs dir if not existed
     if !Path::new(libs_dir).exists() {
@@ -50,23 +53,57 @@ fn main() {
     // find direct libs
     let direct_libs = _find_dylibs_for_img(file);
 
-    //TODO: find hierarchy libs
+    // replace each libs in given image file
+    println!("replace for: {}", file);
+    direct_libs.iter().for_each(|ref lib| _replace(file, libs_prefix, lib));
 
-    // replace each libs
-    direct_libs.iter().for_each(|dylib| _replace(file, libs_dir, libs_prefix, &dylib))
-}
-
-fn _replace(img_file: &str, libs_dir: &str, libs_prefix: &str, lib: &Dylib) {
-    let lib_name = &lib.file_name();
-
-    // copy lib to the libs dir
-    let target_lib_file = &format!("{}{}", libs_dir, lib_name);
-    if !Path::new(&target_lib_file).exists() {
-        fs::copy(&lib.file_path(), target_lib_file).expect(&format!("copy {} failed", target_lib_file));
+    // find all dylibs recursively
+    let mut all_libs = HashSet::new();
+    let mut direct_libs = direct_libs;
+    for lib in direct_libs.drain(..){
+        all_libs.insert(lib);
     }
 
+    let mut size = 0;
+    while size != all_libs.len() {
+        size = all_libs.len();
+
+        let mut new_libs = HashSet::new();
+        all_libs.iter().for_each(|lib| {
+                let mut libs = _find_dylibs_for_img(&lib.file_path());
+                for lib in libs.drain(..) {
+                    new_libs.insert(lib);
+                }
+        });
+        for lib in new_libs.drain() {
+            all_libs.insert(lib);
+        }
+    }
+
+    // print all libs
+    println!("all found libs:");
+    all_libs.iter().for_each(|l| println!("\t{}", &l.path));
+
+    // replace dylibs for each lib image
+    all_libs.iter().for_each(|ref lib| {
+        // copy lib to dest libs dir
+        let target_lib_img = &format!("{}/{}", libs_dir,  &lib.file_name());
+        if !Path::new(&target_lib_img).exists() {
+            fs::copy(&lib.file_path(), target_lib_img).expect(&format!("copy {} failed", target_lib_img));
+            let mut permission = fs::metadata(target_lib_img).expect("wtf: cannot read metadata").permissions();
+            permission.set_readonly(false);
+            fs::set_permissions(target_lib_img, permission).expect("wtf: set permission failed");
+        }
+
+        println!("replace for: {}", target_lib_img);
+        all_libs.iter()
+            .for_each(|ref l| _replace(target_lib_img, libs_prefix, l));
+    });
+}
+
+fn _replace(img_file: &str, libs_prefix: &str, lib: &Dylib) {
     // exec install_name_tool
-    let replaced_lib = &format!("{}{}", libs_prefix, lib_name);
+    let replaced_lib = &format!("{}/{}", libs_prefix, &lib.file_name());
     let output = Command::new("install_name_tool")
         .arg("-change")
         .arg(&lib.path)
