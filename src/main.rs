@@ -47,7 +47,7 @@ fn main() {
 
     // find direct libs
     let direct_libs = _find_dylibs_for_img(file);
-
+    
     //TODO: find hierarchy libs
 
     // replace each libs
@@ -106,7 +106,8 @@ fn _find_dylibs_for_img(img_file: &str) -> Vec<Dylib> {
 }
 
 fn _find_libs(s:&str) -> Option<Dylib> {
-    if s.contains("compatibility version") && s.contains(".dylib") && !s.trim().starts_with("/usr/lib/") {
+    let lib = s.trim();
+    if lib.contains("compatibility version") && lib.contains(".dylib") && !lib.starts_with("/usr/lib/") && !lib.starts_with("@"){
         let mut splits = s.split(".dylib (");
         splits.next().map(|s| Dylib::new(&format!("{}.dylib", s.trim())))
     } else {
