@@ -4,25 +4,27 @@ use std::fs;
 use std::path::Path;
 
 struct Dylib {
-    path: String,
-    real_path: Option<String>,
+    path: String
 }
 
 impl Dylib {
     fn new(path: &str) -> Dylib {
-        let parent = Path::new(path).parent().expect("wtf: no parent?");
+        Dylib { path: path.to_string() }
+    }
 
-        let real_path = fs::read_link(path).map(|pb| _get_absolute_path(pb.as_path(), parent)).unwrap_or(None);
-        Dylib { path: path.to_string(), real_path: real_path }
+    fn file_path(&self) -> String {
+        let parent = Path::new(&self.path).parent().expect("wtf: no parent?");
+        let real_path = fs::read_link(&self.path)
+                            .map(|pb| _get_absolute_path(pb.as_path(), parent))
+                            .unwrap_or(None);
+        match real_path {
+            Some(ref path) => path.to_string(),
+            None => self.path.clone()
+        }
     }
 
     fn file_name(&self) -> String {
-        let path = match self.real_path {
-            Some(ref path) => path,
-            None => &self.path
-        };
-
-        path.split("/").last().expect("wtf").to_string()
+        self.file_path().split("/").last().expect("wtf").to_string()
     }
 }
 
@@ -47,7 +49,7 @@ fn main() {
 
     // find direct libs
     let direct_libs = _find_dylibs_for_img(file);
-    
+
     //TODO: find hierarchy libs
 
     // replace each libs
@@ -58,14 +60,9 @@ fn _replace(img_file: &str, libs_dir: &str, libs_prefix: &str, lib: &Dylib) {
     let lib_name = &lib.file_name();
 
     // copy lib to the libs dir
-    let target_lib = format!("{}{}", libs_dir, lib_name);
-    if !Path::new(&target_lib).exists() {
-        let lib_file = match lib.real_path {
-            Some(ref path) => path,
-            None => &lib.path
-        };
-
-        fs::copy(lib_file, target_lib).expect(&format!("copy {} failed", lib_file));
+    let target_lib_file = &format!("{}{}", libs_dir, lib_name);
+    if !Path::new(&target_lib_file).exists() {
+        fs::copy(&lib.file_path(), target_lib_file).expect(&format!("copy {} failed", target_lib_file));
     }
 
     // exec install_name_tool
@@ -108,8 +105,8 @@ fn _find_dylibs_for_img(img_file: &str) -> Vec<Dylib> {
 fn _find_libs(s:&str) -> Option<Dylib> {
     let lib = s.trim();
     if lib.contains("compatibility version") && lib.contains(".dylib") && !lib.starts_with("/usr/lib/") && !lib.starts_with("@"){
-        let mut splits = s.split(".dylib (");
-        splits.next().map(|s| Dylib::new(&format!("{}.dylib", s.trim())))
+        let mut splits = lib.split(".dylib (");
+        splits.next().map(|s| Dylib::new(&format!("{}.dylib", s)))
     } else {
         None
     }
